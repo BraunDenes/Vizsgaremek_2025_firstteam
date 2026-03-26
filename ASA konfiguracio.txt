@@ -1,0 +1,169 @@
+ASA konfiguracio: 
+A budapesti központi telephely hálózati topológiájában az ASA 5506‑X tűzfal a központi router és az internetszolgáltató (ISP) eszköze között helyezkedik el. Ez a pozíció biztosítja, hogy az ASA a teljes vállalati hálózat peremén működjön, és minden internet irányú forgalom rajta keresztül haladjon át. A tűzfal így képes ellátni a klasszikus peremvédelmi feladatokat: állapottartó csomagszűrés (stateful inspection), NAT/PAT, forgalomszabályozás és a külső támadások elleni védelem.
+
+A belső hálózat több VLAN‑ra és telephelyi alhálózatra tagolódik, amelyek mind a központi routeren keresztül kommunikálnak. A router default route‑ja az ASA inside interfészére mutat, így minden internet irányú forgalom a tűzfal felé kerül továbbításra. Az ASA statikus útvonalakkal ismeri a belső hálózatokat, így a visszirányú forgalom is helyesen kerül továbbításra.
+
+A tűzfal konfigurációja úgy lett kialakítva, hogy kívülről semmilyen kapcsolat ne legyen kezdeményezhető a belső hálózat felé, ezzel biztosítva a teljes izolációt és védelmet az internet felől érkező támadásokkal szemben. Az ASA outside interfészére nem kerültek beengedő ACL‑ek, és nem készült statikus NAT a belső eszközökre, így a külső elérés technikailag lehetetlen.
+
+A belső hálózatból kifelé irányuló kommunikáció teljes mértékben engedélyezett. Az ASA inside interfészén alkalmazott ACL minden belső forgalmat enged az outside irányába, a tűzfal pedig állapottartó módon kezeli a visszatérő csomagokat. A NAT konfiguráció PAT‑ot alkalmaz, így a belső hálózat összes eszköze az ASA outside IP‑címét használja a kifelé irányuló kommunikáció során. Ez egyszerű, biztonságos és skálázható megoldást biztosít.
+
+A tűzfal így egy olyan peremvédelmi eszközként működik, amely:
+
+megakadályozza a külső hozzáférést a belső hálózathoz,
+
+biztosítja a belső eszközök internetelérését,
+
+NAT/PAT segítségével elrejti a belső címeket,
+
+állapottartó módon szűri a forgalmat,
+
+és egységes védelmi pontot képez a teljes vállalati hálózat számára.
+
+Ez az elhelyezés és konfiguráció megfelel a vállalati hálózatokban alkalmazott iparági legjobb gyakorlatoknak, és Packet Tracer környezetben is stabilan, kiszámíthatóan működik.
+
+Gyakorlatban:
+Internetelérés működése az ASA 5506‑X tűzfalon
+A belső hálózatból érkező forgalom az ASA 5506‑X tűzfalon keresztül jut ki az internetre.
+A tűzfal dinamikus PAT (Port Address Translation) segítségével a belső privát IP‑címeket az ASA outside interfészének publikus IP‑címére (203.0.113.2) fordítja. A NAT kizárólag kifelé irányban működik, így a belső hálózat címzése az internet felől nem látható.
+
+A tűzfalon az inside interfész security-level értéke 100, az outside interfészé 0. Ez biztosítja, hogy:
+
+a belső hálózatból minden kimenő kapcsolat engedélyezett,
+
+az internet felől minden bejövő kapcsolat tiltott,
+
+a visszafelé érkező csomagokat az ASA stateful módon engedi vissza, ha azok egy belső kezdeményezéshez tartoznak.
+
+A belső hálózatok elérése statikus route-okkal történik, míg az internet felé az ASA default route‑ot használ (0.0.0.0/0 → 203.0.113.1).
+
+Ez a konfiguráció megfelel a vállalati peremvédelmi gyakorlatnak:
+a belső hálózat rejtve marad, a kifelé irányú kommunikáció zavartalan, és a tűzfal biztosítja a forgalom állapottartó ellenőrzését.
+
+Parancsok: 
+interface GigabitEthernet1/1
+ nameif outside
+ security-level 0
+ ip address 203.0.113.2 255.255.255.252
+!
+interface GigabitEthernet1/2
+ nameif inside
+ security-level 100
+ ip address 192.168.111.1 255.255.255.252
+
+object network INSIDE-172
+ subnet 172.16.0.0 255.255.0.0
+ nat (inside,outside) dynamic interface
+object network INSIDE-NET
+ subnet 192.168.0.0 255.255.0.0
+ nat (inside,outside) dynamic interface
+!
+route outside 0.0.0.0 0.0.0.0 203.0.113.1 1
+route inside 192.168.90.0 255.255.255.252 192.168.111.2 1
+route inside 192.168.110.0 255.255.255.0 192.168.111.2 1
+route inside 192.168.120.0 255.255.255.0 192.168.111.2 1
+route inside 192.168.130.0 255.255.255.0 192.168.111.2 1
+route inside 172.16.10.0 255.255.255.0 192.168.111.2 1
+route inside 172.16.20.0 255.255.255.0 192.168.111.2 1
+!
+access-list INSIDE_OUT extended permit ip any any
+!
+!
+access-group INSIDE_OUT in interface inside
+!
+!
+class-map inspection_default
+ match default-inspection-traffic
+!
+policy-map type inspect dns preset_dns_map
+ parameters
+  message-length maximum 512
+policy-map global_policy
+ class inspection_default
+  inspect dns preset_dns_map
+  inspect ftp 
+  inspect icmp 
+  inspect tftp 
+!
+service-policy global_policy global
+
+Tesztelés: - VALÓDI CÉGES KÖRNYEZETBEN EZ A MÓDSZER EGYÁLTALÁN NEM AJÁNLOTT, FŐLEG, HA A TELEPHELY KRITIKUS A CÉG SZÁMÁRA, KIZÁRÓLAG TESZTELÉSI CÉLOKBÓL DOLGOZTUNK ÍGY -  
+ideiglenesen engedélyezem a visszafele irányba érkező echo-reply icmp csomagokat. Ez azért fontos, mivel eddig az ASA semmilyen csomagot nem egedélyezett visszafele, ezért azt jelezte, amikor pingeltem az ISP router interface-re, vagyis az internetre, hogy request timed out. 
+acl létrehozása ami engedélyezi (beengedi) a válasz icmp csomagot:  
+
+	-access-list OUTSIDE_IN extended permit icmp any any echo-reply
+most ezt az acl-t ráhelyezem a kimenő interface-re: 
+
+	-access-group OUTSIDE_IN in interface outside
+
+--> 
+és hogyha most pingelek kliengépről az internet fele, akkor érkezni fog visszaigazoló csomag arról, hogy működnek a beállítások és van kommunikáció az eszközök között kimenő irányba. 
+
+Kliensről pingelés: MŰKÖDIK
+C:\>ping 203.0.113.1
+
+Pinging 203.0.113.1 with 32 bytes of data:
+
+Reply from 203.0.113.1: bytes=32 time<1ms TTL=253
+Reply from 203.0.113.1: bytes=32 time<1ms TTL=253
+Reply from 203.0.113.1: bytes=32 time<1ms TTL=253
+Reply from 203.0.113.1: bytes=32 time<1ms TTL=253
+
+Ping statistics for 203.0.113.1:
+    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 0ms, Maximum = 0ms, Average = 0ms
+
+Kiegészítés: Debreceni szerverszolgáltatások elérése - ASA ACL – csak a két szegedi szerverre szűkítve - Ez a legbiztonságosabb megoldás: csak a két szerver kommunikálhat, más nem.
+-->
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 53
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.11 any eq 53
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 88
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.11 any eq 88
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 389
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.11 any eq 389
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 445
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 135
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any range 49152 65535
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.11 any range 49152 65535
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 3268
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 80
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 443
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 53
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.7 any eq 53
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 88
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.7 any eq 88
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 389
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.7 any eq 389
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 445
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 135
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any range 49152 65535
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.7 any range 49152 65535
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 3268
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 80
+ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 443
+
+--> Ezeket az ASA outside interfészére kell alkalmazni, mert a forgalom így megy: 
+Debrecen LAN
+   ↓
+Debrecen router
+   ↓
+ISP hálózat (internet-szimuláció)
+   ↓
+ISP router (Budapest)
+   ↓
+ASA (outside)
+   ↓
+ASA (inside)
+   ↓
+Budapesti belső router + LAN
+
+→ az ISP hálózaton keresztül jön. A Debrecenből érkező csomagok az ASA outside interfészére érkeznek, nem az inside‑ra. 
+-> ASA-BP(config)#access-group DEBRECEN_SERVERS in interface outside
+
+Fontos megjegyezni: ASA-t mindenhol használtunk való életben. A szimulációs program túlterhelésének érdekében nem raktuk be mindenhova a packet tracer állományba. 
+
+
+
+
+
+
