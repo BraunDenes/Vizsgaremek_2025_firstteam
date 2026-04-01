@@ -1,0 +1,117 @@
+OSPF‑alapú útvonalválasztás, cost‑hangolás és hibaelhárítás – összefoglaló dokumentáció
+Ez a fejezet bemutatja, hogyan építettem fel a három routerből álló OSPF‑topológiát (SZEG_TR – DevOps – CyberSecurity), hogyan hangoltam az útvonalválasztást OSPF cost értékekkel, milyen hibákkal találkoztam, és hogyan oldottam meg őket. A cél az volt, hogy a hálózat valós vállalati működést modellezzen, és a forgalom terelése tudatos, mérnöki döntések alapján történjen.
+
+1. A topológia felépítése és az OSPF‑tervezés
+A hálózat két nagy részre oszlik:
+
+Rózsaszín szegmens (Szeged) – több VLAN, VoIP, szerverek, kliensek, area 40
+
+Zöld szegmens (CS Operations) – DevOps és CyberSecurity részlegek, area 50 és 60
+
+A két oldal között három router biztosít kapcsolatot:
+
+SZEG_TR
+
+DevOps
+
+CyberSecurity
+
+A három router közötti linkek /30‑as hálózatokkal lettek összekötve, és OSPF area 0‑ba kerültek, mivel minden nem‑backbone area csak a backbone‑on keresztül kommunikálhat. Ez kulcsfontosságú volt ahhoz, hogy a két oldal LAN‑jai átjárhatók legyenek.
+
+2. OSPF szomszédságok és alapműködés
+A konfiguráció után mindhárom routeren stabil OSPF‑szomszédság jött létre:
+
+Gigabites linkeken DR/BDR választás történt
+
+Serial linkeken point‑to‑point kapcsolat miatt nincs DR/BDR
+
+A show ip ospf neighbor parancs mindenhol FULL állapotot mutatott, ami azt jelenti, hogy az OSPF‑adatbázisok szinkronban vannak.
+
+Ez fontos megállapítás volt, mert később kiderült:
+ha a ping nem működik, de a neighbor FULL, akkor a hiba nem a szomszédságban, hanem az útvonalakban van.
+
+3. A hiba: a ping nem működött a két hálózat között
+A rózsaszín és zöld szegmens között a ping bizonyos hálózatokba működött, másokba nem.
+A vizsgálat során kiderült:
+
+A 192.168.38.0/24 hálózat nem jelent meg minden router OSPF‑routing táblájában.
+
+A DevOps router nem látta ezt a hálózatot.
+
+A SZEG_TR router rossz irányba próbálta elérni (a 36.1‑es router felé).
+
+A probléma oka:
+
+A CyberSecurity router nem hirdette be OSPF‑be a 192.168.38.0/24 hálózatot.
+Ezért a hálózat nem jutott át a backbone‑on, és a ping elakadt.
+
+A megoldás:
+
+bash
+router ospf 10
+ network 192.168.38.0 0.0.0.255 area 60
+Ezután a routing táblák helyreálltak, és a ping működött.
+
+4. OSPF cost értékek és a forgalom terelése
+A következő cél az volt, hogy:
+
+A DevOps hálózat felé a serial link legyen a preferált útvonal.
+
+A CyberSecurity hálózat felé viszont a gigabites link maradjon a preferált.
+
+Ez teljesen reális vállalati igény, hiszen különböző részlegek különböző útvonalakat használhatnak optimálisan.
+
+A cost működése
+Az OSPF cost kimenő irányú metrika, vagyis:
+
+minden router maga dönti el, melyik interfészen mennyi a cost,
+
+a két oldal costja nem kell, hogy szimmetrikus legyen,
+
+az OSPF a teljes útvonal összköltségét számolja.
+
+Ezért fordult elő, hogy amikor:
+
+Serial → cost 5
+
+Gig0/2 → cost 100
+
+akkor a SZEG_TR router nem a Serialt választotta, hanem a 36.1‑es router felé terelte a forgalmat, mert az összköltség ott kisebb volt.
+
+Ez fontos tanulság:
+
+Nem elég egy linket olcsóbbá tenni — a teljes útvonal összköltségét kell figyelembe venni.
+5. A végső, működő megoldás
+A SZEG_TR routeren:
+
+✔️ A DevOps felé vezető Serial link olcsó lett:
+bash
+interface Serial0/2/0
+ ip ospf cost 5
+✔️ A 36.1 felé vezető Gig0/0 link drágább lett:
+bash
+interface Gig0/0
+ ip ospf cost 50
+Így:
+
+DevOps felé az összköltség: 5 + X
+
+36.1 felé az összköltség: 50 + Y
+
+A Serial útvonal lett a legolcsóbb → a forgalom oda megy.
+
+CyberSecurity felé viszont továbbra is a gigabites link a preferált.
+
+6. Reális‑e ez vállalati környezetben?
+Igen.
+Az aszimmetrikus útvonalak teljesen normálisak:
+
+terheléselosztás
+
+különböző részlegek eltérő prioritása
+
+redundancia
+
+WAN‑optimalizáció
+
+A módszer, amit alkalmaztunk, valós hálózati forgalom‑mérnöki technika, és tökéletesen illik egy vizsgaremekbe.
