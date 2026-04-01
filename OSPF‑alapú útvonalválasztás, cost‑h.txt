@@ -115,3 +115,135 @@ redundancia
 WAN‑optimalizáció
 
 A módszer, amit alkalmaztunk, valós hálózati forgalom‑mérnöki technika, és tökéletesen illik egy vizsgaremekbe.
+
+CHAP:
+A CHAP lényege, hogy a jelszó soha nem megy át a hálózaton, hanem egy háromlépcsős kihívás‑válasz folyamat során MD5 hash formájában ellenőrzik. A konfiguráció Packet Tracerben egyszerű: mindkét routernek ismernie kell a másik CHAP‑felhasználónevét és jelszavát, és az interfészen engedélyezni kell a PPP‑t és a CHAP‑ot.
+
+1) LCP (Link Control Protocol) felépül
+A PPP kapcsolat első fázisa. Ha az LCP nincs „open” állapotban, CHAP nem indul el.
+
+2) A hitelesítő router küld egy CHALLENGE üzenetet
+Ez tartalmaz:
+
+egy véletlenszerű azonosítót,
+
+a saját nevét (hostname),
+
+egy random értéket.
+
+3) A másik router válaszol egy RESPONSE üzenettel
+A válasz tartalmazza:
+
+a hash értéket (MD5),
+
+a saját nevét.
+
+A hash így készül:
+
+MD5(Challenge_ID + Secret + Random_Value)
+
+4) A hitelesítő router összehasonlítja a hash-t
+Ha egyezik → Success  
+Ha nem → Failure és a kapcsolat bontódik.
+
+A CHAP időnként újra megismétli a hitelesítést, így véd a replay támadások ellen.
+
+konfig a projektben: 
+SZEG_TR - 
+username DevOps password Nincs1
+int s0/2/0
+encapsulation ppp
+ppp authentication chap 
+ppp chap hostname SZEG_TR
+ppp chap password Nincs1 
+
+DevOps - 
+username SZEG_TR password Nincs1 
+int s0/2/0
+encapsulation ppp 
+ppp authentication chap
+ppp chap hostname DevOps
+ppp chap password Nincs1
+
+Mit jelentenek ezek?
+username R2 password cisco  
+Router1 azt mondja: „Ha R2 próbál hitelesíteni, a jelszava cisco.”
+
+ppp chap hostname R1  
+Ez lesz a CHAP „névmezője”, amit a másik router keres a saját username listájában.
+
+ppp chap password cisco  
+Ez a CHAP „secret”, amit a hash‑hez használ.
+
+ppp állapotának ellenőrzése: 
+ - show interfaces se0/2/0 --> itt kell keresni: Encapsulation PPP, LCP Open, Open: IPCP, CDPCP sorokat 
+
+Switch SSH-ra vonatkozó ACL: a 99-es hálóban lévő sw-nek kell, hogy csak egy külső cím tudjon ráSSH-zni
+
+ACL: 
+ip access-list standard SSH_ONLY
+ permit 192.168.38.20
+ deny any
+
+ACL alkalmazása a VTY vonalakra: 
+line vty 0 4
+ access-class SSH_ONLY in
+ transport input ssh
+
+ellenőrzés: 
+show run | section vty
+
+OSPF redistribute static parancs kiadása végroutereken: 
+A redistribute static parancsot elég egyetlen routeren kiadni, mégpedig azon, amelyikben a statikus útvonalak ténylegesen szerepelnek. Onnantól kezdve az OSPF‑hálózat összes többi routere automatikusan megkapja ezeket az útvonalakat OSPF external (O E2) formában.
+
+A redistribute static parancs azt csinálja, hogy minden a routeren lévő statikus útvonalat betolja az OSPF-be, és a többi OSPF‑router felé úgy hirdeti, mintha OSPF‑en tanulta volna. Ezek az útvonalak OSPF‑ben „O E2” (external type 2) útvonalként fognak megjelenni. 
+
+Az OSPF úgy működik, hogy bármely router, amelyik redisztribúciót végez,
+LSA Type 5 üzeneteket generál a statikus útvonalakról.
+
+Ezeket az LSA‑kat:
+
+a teljes OSPF‑hálózat továbbterjeszti,
+
+minden router beépíti a saját OSPF adatbázisába,
+
+és a routing táblában O E2 (vagy ha úgy állítod: O E1) útvonalként jelennek meg.
+
+Hogyan ellenőrzöd, hogy működik?
+Ha látod az O E2 útvonalakat → működik.
+
+ACL szűrés a távmunkás részre: 
+Ez az ACL:
+
+engedi a visszatérő TCP forgalmat (established),
+
+engedi a két központi szerver felé menő válaszokat,
+
+tiltja az internet felől érkező támadásokat,
+
+engedi a router saját menedzsmentjét, ha kell.
+
+ACL konfiguráció - 
+ip access-list extended HOME_IN
+ remark ---- Allow return traffic (TCP established) ----
+ permit tcp any any established
+
+ remark ---- Allow ICMP replies ----
+ permit icmp any any echo-reply
+
+ remark ---- Allow access to central servers ----
+ permit ip any host 192.168.20.11
+ permit ip any host 192.168.20.7
+
+ remark ---- Block inbound traffic to the home LAN ----
+ deny ip any 192.168.50.0 0.0.0.255
+
+ remark ---- Allow everything else ----
+ permit ip any any
+
+Alkalmazás a WAN interfészre - 
+interface GigabitEthernet0/1
+ ip access-group HOME_IN in
+
+
+
