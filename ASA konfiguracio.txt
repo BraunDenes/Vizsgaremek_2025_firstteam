@@ -86,18 +86,45 @@ policy-map global_policy
 !
 service-policy global_policy global
 
-Tesztelés: - VALÓDI CÉGES KÖRNYEZETBEN EZ A MÓDSZER EGYÁLTALÁN NEM AJÁNLOTT, FŐLEG, HA A TELEPHELY KRITIKUS A CÉG SZÁMÁRA, KIZÁRÓLAG TESZTELÉSI CÉLOKBÓL DOLGOZTUNK ÍGY -  
-ideiglenesen engedélyezem a visszafele irányba érkező echo-reply icmp csomagokat. Ez azért fontos, mivel eddig az ASA semmilyen csomagot nem egedélyezett visszafele, ezért azt jelezte, amikor pingeltem az ISP router interface-re, vagyis az internetre, hogy request timed out. 
-acl létrehozása ami engedélyezi (beengedi) a válasz icmp csomagot:  
+Mit kell engedni?
+1) A két debreceni szerver (192.168.20.11 és 192.168.20.7) befelé kommunikálhasson
+Ez kell az AD‑hez, DNS‑hez, webhez, replikációhoz, stb.
 
-	-access-list OUTSIDE_IN extended permit icmp any any echo-reply
-most ezt az acl-t ráhelyezem a kimenő interface-re: 
+2) A budapesti hálózat elérje:
+a két szervert
 
-	-access-group OUTSIDE_IN in interface outside
+a többi telephelyet
 
---> 
-és hogyha most pingelek kliengépről az internet fele, akkor érkezni fog visszaigazoló csomag arról, hogy működnek a beállítások és van kommunikáció az eszközök között kimenő irányba. 
+az internetet
 
+Ez már most működik, mert:
+
+INSIDE → OUTSIDE irány engedett
+
+ASA stateful, tehát a válaszok visszajönnek
+
+3) Kívülről semmi más ne jöhessen be
+Ez a biztonságos alapállapot.
+
+Ez az ACL:
+
+engedi a két szervert befelé
+
+engedi a ping válaszokat
+
+minden mást tilt
+------------------
+ACL: 
+access-list OUTSIDE_IN extended permit ip host 192.168.20.11 192.168.111.0 255.255.255.252
+access-list OUTSIDE_IN extended permit ip host 192.168.20.7 192.168.111.0 255.255.255.252
+
+access-list OUTSIDE_IN extended permit icmp any any echo-reply
+
+access-list OUTSIDE_IN extended deny ip any any
+
+Alkalmazása: 
+access-group OUTSIDE_IN in interface outside
+-----------------
 Kliensről pingelés: MŰKÖDIK
 C:\>ping 203.0.113.1
 
@@ -113,34 +140,15 @@ Ping statistics for 203.0.113.1:
 Approximate round trip times in milli-seconds:
     Minimum = 0ms, Maximum = 0ms, Average = 0ms
 
-Kiegészítés: Debreceni szerverszolgáltatások elérése - ASA ACL – csak a két szegedi szerverre szűkítve - Ez a legbiztonságosabb megoldás: csak a két szerver kommunikálhat, más nem.
--->
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 53
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.11 any eq 53
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 88
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.11 any eq 88
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 389
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.11 any eq 389
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 445
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 135
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any range 49152 65535
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.11 any range 49152 65535
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 3268
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 80
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.11 any eq 443
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 53
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.7 any eq 53
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 88
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.7 any eq 88
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 389
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.7 any eq 389
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 445
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 135
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any range 49152 65535
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit udp host 192.168.20.7 any range 49152 65535
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 3268
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 80
-ASA-BP(config)#access-list DEBRECEN_SERVERS extended permit tcp host 192.168.20.7 any eq 443
+ASA‑n:
+
+NEM kell established, mert az ASA stateful firewall
+
+automatikusan engedi a visszatérő forgalmat
+
+csak a beérkező új kapcsolatokat kell szabályozni ACL‑lel
+
+Ezért az ASA‑n az ACL csak az új, kívülről induló kapcsolatokat érinti.
 
 --> Ezeket az ASA outside interfészére kell alkalmazni, mert a forgalom így megy: 
 Debrecen LAN
@@ -161,6 +169,32 @@ Budapesti belső router + LAN
 -> ASA-BP(config)#access-group DEBRECEN_SERVERS in interface outside
 
 Fontos megjegyezni: ASA-t mindenhol használtunk való életben. A szimulációs program túlterhelésének érdekében nem raktuk be mindenhova a packet tracer állományba. 
+
+Szeged és Budapesti Telephely ACL-ek: 
+Az alábbi ACL‑ek pontosan azt csinálják, amit kérsz:
+
+kifelé bárhova lehet kommunikálni
+
+befelé csak a két debreceni szerver jöhet
+
+a telephelyek egymást is elérik
+
+ping működik
+
+minden más WAN felől tiltva van
+
+ip access-list extended SITE_IN
+ remark ---- Allow return traffic (TCP established) ----
+ permit tcp any any established
+
+ remark ---- Allow ICMP replies ----
+ permit icmp any any echo-reply
+
+ remark ---- Allow Debrecen servers to access this site ----
+ permit ip host 192.168.20.11 any
+ permit ip host 192.168.20.7 any
+
+
 
 
 
